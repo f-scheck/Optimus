@@ -1,4 +1,4 @@
-# Cloud Run: set port 8080
+# Cloud Run sets PORT at runtime (often 8080). Listen on $PORT so traffic reaches the app.
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -13,4 +13,5 @@ COPY app ./app
 
 EXPOSE 8080
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Shell form so ${PORT:-8080} is expanded when the container starts
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
