@@ -4,12 +4,78 @@ FastAPI Monte Carlo wealth projection for Cloud Run (no auth).
 
 from __future__ import annotations
 
+import calendar
+from datetime import date, datetime, timezone
+from typing import Literal
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 
 from app.simulation import run_monte_carlo
+
+
+def _add_months(d: date, months: int) -> date:
+    """Calendar month offset; clamps day to last day of month when needed."""
+    m0 = d.month - 1 + months
+    year = d.year + m0 // 12
+    month = m0 % 12 + 1
+    last = calendar.monthrange(year, month)[1]
+    day = min(d.day, last)
+    return date(year, month, day)
+
+
+def _date_to_utc_start_ms(d: date) -> int:
+    dt = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)
+
+
+def _highstock_series(
+    month_indices: list[int],
+    best: list[float],
+    average: list[float],
+    worst: list[float],
+    start: date,
+    best_pct: float,
+    worst_pct: float,
+    initial_amount: float,
+    monthly_savings: float,
+) -> list[dict]:
+    times = [_date_to_utc_start_ms(_add_months(start, m)) for m in month_indices]
+
+    def rows(vals: list[float]) -> list[list]:
+        return [[t, round(float(v), 2)] for t, v in zip(times, vals)]
+
+    # Cumulative cash invested: matches simulation indices (month 0 = initial only).
+    invested = [round(float(initial_amount) + float(m) * float(monthly_savings), 2) for m in month_indices]
+
+    return [
+        {
+            "name": "Total invested (initial + cumulative savings)",
+            "type": "line",
+            "dashStyle": "ShortDash",
+            "data": rows(invested),
+        },
+        {
+            "name": f"Best case (p{best_pct:g})",
+            "type": "line",
+            "dashStyle": "Solid",
+            "data": rows(best),
+        },
+        {
+            "name": "Average (mean)",
+            "type": "line",
+            "dashStyle": "Solid",
+            "data": rows(average),
+        },
+        {
+            "name": f"Worst case (p{worst_pct:g})",
+            "type": "line",
+            "dashStyle": "Solid",
+            "data": rows(worst),
+        },
+    ]
 
 app = FastAPI(
     title="Optimus Monte Carlo",
@@ -150,11 +216,26 @@ class SimulationRequest(BaseModel):
         return self
 
 
-class SimulationResponse(BaseModel):
-    months: list[int]
-    best_case: list[float]
-    average_case: list[float]
-    worst_case: list[float]
+class HighstockSeries(BaseModel):
+    """One Highcharts/Highstock series: data points are [x_ms_utc, y_value]."""
+
+    name: str
+    type: str = "line"
+    data: list[list[float | int]]
+    dashStyle: str = "Solid"
+
+
+class SimulationChartResponse(BaseModel):
+    """
+    Drop-in for Highcharts Stock: pass `series` to the chart config.
+    Use xAxis: { type: 'datetime' }; timestamps are UTC start-of-day per month from start_date_utc.
+    Series order: total invested (contributions), best, average, worst.
+    """
+
+    series: list[HighstockSeries]
+    x_axis_type: Literal["datetime"] = "datetime"
+    time_zone: Literal["UTC"] = "UTC"
+    start_date_utc: str
     best_percentile: float
     worst_percentile: float
     n_simulations: int
@@ -166,7 +247,7 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/simulate", response_model=SimulationResponse)
+@app.post("/simulate", response_model=SimulationChartResponse)
 def simulate(body: SimulationRequest):
     try:
         out = run_monte_carlo(
@@ -185,4 +266,23 @@ def simulate(body: SimulationRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
 
-    return SimulationResponse(**out)
+    start = datetime.now(timezone.utc).date()
+    series_payload = _highstock_series(
+        out["months"],
+        out["best_case"],
+        out["average_case"],
+        out["worst_case"],
+        start,
+        out["best_percentile"],
+        out["worst_percentile"],
+        body.initial_investment_amount,
+        body.monthly_savings_plan_amount,
+    )
+    return SimulationChartResponse(
+        series=[HighstockSeries(**s) for s in series_payload],
+        start_date_utc=start.isoformat(),
+        best_percentile=out["best_percentile"],
+        worst_percentile=out["worst_percentile"],
+        n_simulations=out["n_simulations"],
+        n_months=out["n_months"],
+    )
