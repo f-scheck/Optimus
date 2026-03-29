@@ -47,10 +47,24 @@ def _highstock_series(
     def rows(vals: list[float]) -> list[list]:
         return [[t, round(float(v), 2)] for t, v in zip(times, vals)]
 
+    def rows_arearange(low: list[float], high: list[float]) -> list[list]:
+        out: list[list] = []
+        for t, lo, hi in zip(times, low, high):
+            a, b = (float(lo), float(hi)) if lo <= hi else (float(hi), float(lo))
+            out.append([t, round(a, 2), round(b, 2)])
+        return out
+
     # Cumulative cash invested: matches simulation indices (month 0 = initial only).
     invested = [round(float(initial_amount) + float(m) * float(monthly_savings), 2) for m in month_indices]
 
     return [
+        {
+            "name": f"Range p{worst_pct:g}–p{best_pct:g} (worst–best)",
+            "type": "arearange",
+            "fillOpacity": 0.35,
+            "lineWidth": 0,
+            "data": rows_arearange(worst, best),
+        },
         {
             "name": "Total invested (initial + cumulative savings)",
             "type": "line",
@@ -58,31 +72,16 @@ def _highstock_series(
             "data": rows(invested),
         },
         {
-            "name": f"Best case (p{best_pct:g})",
-            "type": "area",
-            "dashStyle": "Solid",
-            "fillOpacity": 0.35,
-            "data": rows(best),
-        },
-        {
             "name": "Average (mean)",
-            "type": "area",
+            "type": "line",
             "dashStyle": "Solid",
-            "fillOpacity": 0.35,
             "data": rows(average),
-        },
-        {
-            "name": f"Worst case (p{worst_pct:g})",
-            "type": "area",
-            "dashStyle": "Solid",
-            "fillOpacity": 0.35,
-            "data": rows(worst),
         },
     ]
 
 app = FastAPI(
     title="Optimus Monte Carlo",
-    description="Wealth simulation: best / average / worst case time series",
+    description="Wealth simulation: percentile range (arearange), average, and invested baseline",
     version="1.0.0",
 )
 
@@ -220,22 +219,23 @@ class SimulationRequest(BaseModel):
 
 
 class HighstockSeries(BaseModel):
-    """One Highcharts/Highstock series: data points are [x_ms_utc, y_value]."""
+    """Highcharts series: line/area use [x, y]; arearange uses [x, low, high]."""
 
     model_config = ConfigDict(exclude_none=True)
 
     name: str
     type: str = "line"
     data: list[list[float | int]]
-    dashStyle: str = "Solid"
+    dashStyle: str | None = "Solid"
     fillOpacity: float | None = None
+    lineWidth: int | None = None
 
 
 class SimulationChartResponse(BaseModel):
     """
     Drop-in for Highcharts Stock: pass `series` to the chart config.
     Use xAxis: { type: 'datetime' }; timestamps are UTC start-of-day per month from start_date_utc.
-    Series order: total invested (line), best / average / worst (area).
+    Series order: worst–best (arearange), total invested (line), average (line).
     """
 
     series: list[HighstockSeries]
