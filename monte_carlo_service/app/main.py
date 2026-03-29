@@ -34,7 +34,7 @@ def _date_to_utc_start_ms(d: date) -> int:
 def _highstock_series(
     month_indices: list[int],
     best: list[float],
-    average: list[float],
+    _average: list[float],
     worst: list[float],
     start: date,
     best_pct: float,
@@ -71,17 +71,11 @@ def _highstock_series(
             "dashStyle": "ShortDash",
             "data": rows(invested),
         },
-        {
-            "name": "Average (mean)",
-            "type": "line",
-            "dashStyle": "Solid",
-            "data": rows(average),
-        },
     ]
 
 app = FastAPI(
     title="Optimus Monte Carlo",
-    description="Wealth simulation: percentile range (arearange), average, and invested baseline",
+    description="Wealth simulation: percentile range (arearange) and invested baseline",
     version="1.0.0",
 )
 
@@ -235,7 +229,7 @@ class SimulationChartResponse(BaseModel):
     """
     Drop-in for Highcharts Stock: pass `series` to the chart config.
     Use xAxis: { type: 'datetime' }; timestamps are UTC start-of-day per month from start_date_utc.
-    Series order: worst–best (arearange), total invested (line), average (line).
+    Series order: worst–best (arearange), total invested (line).
     """
 
     series: list[HighstockSeries]
