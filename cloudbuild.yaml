@@ -18,7 +18,7 @@ images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
 
 substitutions:
-  _REGION: europe-west1
+  _REGION: europe-west3
   _AR_REPOSITORY: cloud-run-source-deploy
   _IMAGE_NAME: optimus-monte-carlo
   _TAG: latest

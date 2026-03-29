@@ -16,10 +16,10 @@
 #   GCP_SERVICE_ACCOUNT             full email: github-deploy@PROJECT.iam.gserviceaccount.com
 #
 # GitHub repository variables (Settings → Secrets and variables → Actions → Variables):
-#   GCP_PROJECT_ID                  your GCP project id
-#   GCP_REGION                      e.g. europe-west1
-#   GCP_ARTIFACT_REPOSITORY         Artifact Registry repo name (docker)
-#   CLOUD_RUN_SERVICE               Cloud Run service name (default below if unset)
+#   GCP_PROJECT_ID                  default in workflow: stockshares-dev
+#   GCP_REGION                      default in workflow: europe-west3
+#   GCP_ARTIFACT_REPOSITORY         default: cloud-run-source-deploy (Docker repo in same region)
+#   CLOUD_RUN_SERVICE               default: optimus-monte-carlo
 
 name: Deploy Monte Carlo API to Cloud Run
 
@@ -43,7 +43,9 @@ permissions:
 
 env:
   SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'optimus-monte-carlo' }}
-  REGION: ${{ vars.GCP_REGION || 'europe-west1' }}
+  REGION: ${{ vars.GCP_REGION || 'europe-west3' }}
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'stockshares-dev' }}
+  AR_REPO: ${{ vars.GCP_ARTIFACT_REPOSITORY || 'cloud-run-source-deploy' }}
 
 jobs:
   deploy:
@@ -66,13 +68,9 @@ jobs:
 
       - name: Validate configuration
         run: |
-          test -n "${{ vars.GCP_PROJECT_ID }}" || { echo "Set repository variable GCP_PROJECT_ID"; exit 1; }
-          test -n "${{ vars.GCP_ARTIFACT_REPOSITORY }}" || { echo "Set repository variable GCP_ARTIFACT_REPOSITORY"; exit 1; }
+          echo "Using PROJECT_ID=${PROJECT_ID} REGION=${REGION} SERVICE=${SERVICE} AR_REPO=${AR_REPO}"
 
       - name: Build and push image (Cloud Build)
-        env:
-          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          AR_REPO: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
         run: |
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA:0:7}"
@@ -86,8 +84,6 @@ jobs:
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
 
       - name: Deploy to Cloud Run
-        env:
-          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
         run: |
           set -euo pipefail
           gcloud run deploy "${SERVICE}" \
@@ -98,11 +94,30 @@ jobs:
             --project "${PROJECT_ID}" \
             --quiet
 
-      - name: Show service URL
-        env:
-          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      - name: Show deployed URL and revision (verify in browser)
         run: |
+          set -euo pipefail
+          echo "=== Open THIS URL (must match service ${SERVICE} in ${REGION}) ==="
+          URL="$(gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --format 'value(status.url)')"
+          echo "${URL}"
+          echo ""
+          echo "=== Latest ready revision and container image ==="
+          echo -n "revision: "
           gcloud run services describe "${SERVICE}" \
             --region "${REGION}" \
             --project "${PROJECT_ID}" \
-            --format 'value(status.url)'
+            --format 'value(status.latestReadyRevisionName)'
+          echo -n "image: "
+          gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --format 'value(spec.template.spec.containers[0].image)'
+          echo ""
+          echo "=== Traffic split (100% should be on the new revision) ==="
+          gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --format 'yaml(status.traffic)'
