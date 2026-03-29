@@ -11,7 +11,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.simulation import run_monte_carlo
 
@@ -59,20 +59,23 @@ def _highstock_series(
         },
         {
             "name": f"Best case (p{best_pct:g})",
-            "type": "line",
+            "type": "area",
             "dashStyle": "Solid",
+            "fillOpacity": 0.35,
             "data": rows(best),
         },
         {
             "name": "Average (mean)",
-            "type": "line",
+            "type": "area",
             "dashStyle": "Solid",
+            "fillOpacity": 0.35,
             "data": rows(average),
         },
         {
             "name": f"Worst case (p{worst_pct:g})",
-            "type": "line",
+            "type": "area",
             "dashStyle": "Solid",
+            "fillOpacity": 0.35,
             "data": rows(worst),
         },
     ]
@@ -219,17 +222,20 @@ class SimulationRequest(BaseModel):
 class HighstockSeries(BaseModel):
     """One Highcharts/Highstock series: data points are [x_ms_utc, y_value]."""
 
+    model_config = ConfigDict(exclude_none=True)
+
     name: str
     type: str = "line"
     data: list[list[float | int]]
     dashStyle: str = "Solid"
+    fillOpacity: float | None = None
 
 
 class SimulationChartResponse(BaseModel):
     """
     Drop-in for Highcharts Stock: pass `series` to the chart config.
     Use xAxis: { type: 'datetime' }; timestamps are UTC start-of-day per month from start_date_utc.
-    Series order: total invested (contributions), best, average, worst.
+    Series order: total invested (line), best / average / worst (area).
     """
 
     series: list[HighstockSeries]
@@ -247,7 +253,11 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/simulate", response_model=SimulationChartResponse)
+@app.post(
+    "/simulate",
+    response_model=SimulationChartResponse,
+    response_model_exclude_none=True,
+)
 def simulate(body: SimulationRequest):
     try:
         out = run_monte_carlo(
