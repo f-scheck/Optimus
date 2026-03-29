@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 
 from app.simulation import run_monte_carlo
@@ -22,6 +23,94 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_INDEX_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Optimus — Portfolio optimization</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: linear-gradient(160deg, #0f172a 0%, #1e293b 45%, #0c4a6e 100%);
+      color: #e2e8f0;
+    }
+    .card {
+      text-align: center;
+      padding: 2.5rem 2rem;
+      max-width: 28rem;
+    }
+    .logo {
+      width: 88px;
+      height: 88px;
+      margin: 0 auto 1.25rem;
+      filter: drop-shadow(0 8px 24px rgba(56, 189, 248, 0.25));
+    }
+    h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #f8fafc;
+    }
+    .tagline {
+      margin: 0;
+      font-size: 1rem;
+      line-height: 1.5;
+      color: #94a3b8;
+    }
+    .by {
+      display: block;
+      margin-top: 0.75rem;
+      font-size: 0.875rem;
+      color: #38bdf8;
+      font-weight: 500;
+    }
+    .links {
+      margin-top: 1.75rem;
+      font-size: 0.8125rem;
+    }
+    .links a {
+      color: #7dd3fc;
+      text-decoration: none;
+    }
+    .links a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <svg class="logo" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:#38bdf8"/>
+          <stop offset="100%" style="stop-color:#0ea5e9"/>
+        </linearGradient>
+      </defs>
+      <circle cx="48" cy="48" r="44" fill="none" stroke="url(#g)" stroke-width="3" opacity="0.35"/>
+      <path d="M22 58 L36 44 L50 52 L64 32 L74 38" fill="none" stroke="url(#g)" stroke-width="3.5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="74" cy="38" r="4" fill="#38bdf8"/>
+    </svg>
+    <h1>Optimus</h1>
+    <p class="tagline">Portfolio optimization repository</p>
+    <span class="by">by fscheck</span>
+    <p class="links"><a href="/docs">API docs</a> · <a href="/health">health</a></p>
+  </div>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return HTMLResponse(content=_INDEX_HTML)
 
 
 class SimulationRequest(BaseModel):
