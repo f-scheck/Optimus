@@ -1,11 +1,28 @@
 # Cloud Build — build context is monte_carlo_service/ (Dockerfile lives there).
 # Use this file when the build runs from the repository root (GitHub trigger, "Dockerfile not found" at /workspace).
 #
-# GCP trigger: set build configuration to "Cloud Build configuration file" → cloudbuild.yaml
-# Override substitutions in the trigger if your region / Artifact Registry repo / service name differ.
+# Flow: docker build → docker push → Cloud Run deploy (image must be in registry before deploy;
+# the built-in `images:` push runs only after all steps, so we push explicitly then deploy).
+#
+# Cloud Build service account (PROJECT_NUMBER@cloudbuild.gserviceaccount.com) needs:
+#   - roles/run.admin
+#   - roles/artifactregistry.writer (push)
+#   - roles/iam.serviceAccountUser on the Cloud Run runtime service account
+#     (often PROJECT_NUMBER-compute@developer.gserviceaccount.com)
+#
+# GCP trigger: "Cloud Build configuration file" → cloudbuild.yaml
+# Override substitutions in the trigger if region / repo / service name differ.
+
+substitutions:
+  _REGION: europe-west3
+  _AR_REPOSITORY: cloud-run-source-deploy
+  _IMAGE_NAME: optimus-monte-carlo
+  _TAG: latest
+  _SERVICE_NAME: optimus-monte-carlo
 
 steps:
   - name: gcr.io/cloud-builders/docker
+    id: build
     args:
       - build
       - "-t"
@@ -14,14 +31,24 @@ steps:
       - monte_carlo_service/Dockerfile
       - monte_carlo_service
 
-images:
-  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+  - name: gcr.io/cloud-builders/docker
+    id: push
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
 
-substitutions:
-  _REGION: europe-west3
-  _AR_REPOSITORY: cloud-run-source-deploy
-  _IMAGE_NAME: optimus-monte-carlo
-  _TAG: latest
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy-cloud-run
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --quiet
 
 options:
   logging: CLOUD_LOGGING_ONLY

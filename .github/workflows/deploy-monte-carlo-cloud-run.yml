@@ -76,25 +76,14 @@ jobs:
           SHORT_SHA="${GITHUB_SHA:0:7}"
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${SHORT_SHA}"
           echo "Building ${IMAGE}"
-          # Root cloudbuild.yaml: Dockerfile path monte_carlo_service/Dockerfile (fixes /workspace/Dockerfile missing)
+          # cloudbuild.yaml: build → push → Cloud Run deploy (see repo root cloudbuild.yaml)
           gcloud builds submit . \
             --config cloudbuild.yaml \
-            --substitutions=_REGION="${REGION}",_AR_REPOSITORY="${AR_REPO}",_IMAGE_NAME="${SERVICE}",_TAG="${SHORT_SHA}" \
+            --substitutions=_REGION="${REGION}",_AR_REPOSITORY="${AR_REPO}",_IMAGE_NAME="${SERVICE}",_SERVICE_NAME="${SERVICE}",_TAG="${SHORT_SHA}" \
             --project "${PROJECT_ID}"
           echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
 
-      - name: Deploy to Cloud Run
-        run: |
-          set -euo pipefail
-          gcloud run deploy "${SERVICE}" \
-            --image "${IMAGE}" \
-            --region "${REGION}" \
-            --platform managed \
-            --allow-unauthenticated \
-            --project "${PROJECT_ID}" \
-            --quiet
-
-      - name: Show deployed URL and revision (verify in browser)
+      - name: Show deployed URL and revision
         run: |
           set -euo pipefail
           echo "=== Open THIS URL (must match service ${SERVICE} in ${REGION}) ==="
