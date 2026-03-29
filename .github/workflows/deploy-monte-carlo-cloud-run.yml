@@ -1,0 +1,108 @@
+# Deploy monte_carlo_service to Google Cloud Run on push to main.
+#
+# Prerequisites (GCP):
+#   1. Enable APIs: Cloud Run, Cloud Build, Artifact Registry, IAM Credentials
+#   2. Create Artifact Registry docker repo (e.g. optimus)
+#   3. Create a service account for GitHub with roles:
+#        - roles/run.admin
+#        - roles/iam.serviceAccountUser  (on Cloud Run runtime SA if different)
+#        - roles/artifactregistry.writer
+#        - roles/cloudbuild.builds.editor   (or builds.builder + logs)
+#   4. Workload Identity Federation: connect GitHub → allow this repo to impersonate that SA
+#      https://github.com/google-github-actions/auth/blob/main/README.md
+#
+# GitHub repository secrets:
+#   GCP_WORKLOAD_IDENTITY_PROVIDER  e.g. projects/123/locations/global/workloadIdentityPools/pool/providers/gh
+#   GCP_SERVICE_ACCOUNT             full email: github-deploy@PROJECT.iam.gserviceaccount.com
+#
+# GitHub repository variables (Settings → Secrets and variables → Actions → Variables):
+#   GCP_PROJECT_ID                  your GCP project id
+#   GCP_REGION                      e.g. europe-west1
+#   GCP_ARTIFACT_REPOSITORY         Artifact Registry repo name (docker)
+#   CLOUD_RUN_SERVICE               Cloud Run service name (default below if unset)
+
+name: Deploy Monte Carlo API to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "monte_carlo_service/**"
+      - "cloudbuild.yaml"
+      - ".github/workflows/deploy-monte-carlo-cloud-run.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: cloud-run-monte-carlo-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'optimus-monte-carlo' }}
+  REGION: ${{ vars.GCP_REGION || 'europe-west1' }}
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Validate configuration
+        run: |
+          test -n "${{ vars.GCP_PROJECT_ID }}" || { echo "Set repository variable GCP_PROJECT_ID"; exit 1; }
+          test -n "${{ vars.GCP_ARTIFACT_REPOSITORY }}" || { echo "Set repository variable GCP_ARTIFACT_REPOSITORY"; exit 1; }
+
+      - name: Build and push image (Cloud Build)
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          AR_REPO: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/${SERVICE}:${SHORT_SHA}"
+          echo "Building ${IMAGE}"
+          # Root cloudbuild.yaml: Dockerfile path monte_carlo_service/Dockerfile (fixes /workspace/Dockerfile missing)
+          gcloud builds submit . \
+            --config cloudbuild.yaml \
+            --substitutions=_REGION="${REGION}",_AR_REPOSITORY="${AR_REPO}",_IMAGE_NAME="${SERVICE}",_TAG="${SHORT_SHA}" \
+            --project "${PROJECT_ID}"
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+
+      - name: Deploy to Cloud Run
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          gcloud run deploy "${SERVICE}" \
+            --image "${IMAGE}" \
+            --region "${REGION}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --project "${PROJECT_ID}" \
+            --quiet
+
+      - name: Show service URL
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          gcloud run services describe "${SERVICE}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --format 'value(status.url)'

@@ -1,0 +1,27 @@
+# Cloud Build — build context is monte_carlo_service/ (Dockerfile lives there).
+# Use this file when the build runs from the repository root (GitHub trigger, "Dockerfile not found" at /workspace).
+#
+# GCP trigger: set build configuration to "Cloud Build configuration file" → cloudbuild.yaml
+# Override substitutions in the trigger if your region / Artifact Registry repo / service name differ.
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - "-t"
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+      - "-f"
+      - monte_carlo_service/Dockerfile
+      - monte_carlo_service
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPOSITORY}/${_IMAGE_NAME}:${_TAG}
+
+substitutions:
+  _REGION: europe-west1
+  _AR_REPOSITORY: cloud-run-source-deploy
+  _IMAGE_NAME: optimus-monte-carlo
+  _TAG: latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -77,6 +77,14 @@ gcloud run deploy $SERVICE \
 
 No authentication is configured in the app; use Cloud Run IAM / VPC if you need to restrict access later.
 
+### Cloud Build: `Dockerfile` not at repo root
+
+Cloud Build often checks out the **whole repository** to `/workspace` and looks for **`/workspace/Dockerfile`**. The service Dockerfile lives in **`monte_carlo_service/`**. The repo root **`cloudbuild.yaml`** builds with:
+
+`docker build -f monte_carlo_service/Dockerfile monte_carlo_service`
+
+In a **Cloud Build trigger**, set configuration to **Cloud Build configuration file** → `cloudbuild.yaml`. Match `_AR_REPOSITORY` and `_IMAGE_NAME` in that file to your Artifact Registry repo and image name (or override substitutions in the trigger).
+
 ## Docker (manual)
 
 ```bash
